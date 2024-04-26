@@ -70,3 +70,7 @@ openvfd_boxid="15"
 
 # Add custom log
 echo "[$(date +"%Y.%m.%d.%H:%M:%S")] All custom services executed successfully!" >>${custom_log}
+# ADD drive
+modprobe dvb-usb
+insmod /etc/modules-load.d/dvb-usb-smit.ko
+insmod /etc/modules-load.d/dvb-usb-hd2312.ko
