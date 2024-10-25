@@ -1,0 +1,154 @@
+From 543e3b81d775350331ce9aa085d1631d575c6d6a Mon Sep 17 00:00:00 2001
+From: hanwckf <hanwckf@vip.qq.com>
+Date: Fri, 6 Sep 2024 21:16:53 +0800
+Subject: [PATCH] remove magic numbers
+
+---
+ hd2312-fe.c   | 37 +++++++++++++++++++++++++++++++------
+ hd2312.h      |  8 ++++++++
+ hdic_hd2312.c | 12 +++++-------
+ 3 files changed, 44 insertions(+), 13 deletions(-)
+
+diff --git a/hd2312-fe.c b/hd2312-fe.c
+index c1bd08d..a62aa7a 100644
+--- a/hd2312-fe.c
++++ b/hd2312-fe.c
+@@ -11,6 +11,7 @@
+ 
+ #include "dvb-usb.h"
+ #include "hd2312.h"
++
+ static const struct dvb_frontend_ops hd2312_ops;
+ 
+ struct dvb_frontend *hd2312_attach(struct dvb_usb_device *dev)
+@@ -69,7 +70,11 @@ static int hd2312_set_frontend(struct dvb_frontend *fe)
+ 
+ 	pr_debug("hd2312: set freq %d Hz\n", freq);
+ 
+-	ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0), 0xFC, 0x40, 0xFE, 0, buf, 4, 500);
++	ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0),
++		CYUSB_HD2312_SET_FREQ,
++		USB_TYPE_VENDOR,
++		0xFE, 0, buf, 4, 500);
++
+ 	state->frequency = fe->dtv_property_cache.frequency;
+ 
+ 	kfree(buf);
+@@ -89,13 +94,20 @@ static int hd2312_get_frontend(struct dvb_frontend *fe,
+ {
+ 	struct hd2312_state *state = fe->demodulator_priv;
+ 	struct usb_device *dev;
++	int ret;
+ 
+ 	u8 *data = state->status;
+ 
+ 	c->frequency = state->frequency;
+ 
+ 	dev = state->dev->udev;
+-	if (usb_control_msg(dev, usb_rcvctrlpipe(dev, 0), 0xE7, 0xC0, 0xFE, 0, data, 6, 500) != 6)
++
++	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
++		CYUSB_HD2312_GET_FRONTEND,
++		USB_TYPE_VENDOR | USB_DIR_IN,
++		0xFE, 0, data, 6, 500);
++
++	if (ret != 6)
+ 		return 0;
+ 
+ 	pr_debug("%s: fe status: %02X, %02X, %02X, %02X, %02X, %02X\n", __func__,
+@@ -177,7 +189,11 @@ static int hd2312_read_status(struct dvb_frontend *fe, enum fe_status *status)
+ 	*status = 0;
+ 
+ 	dev = state->dev->udev;
+-	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0), 0xEA, 0xC0, 0xFE, 0, isLock, 1, 500);
++
++	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
++		CYUSB_HD2312_GET_LOCK,
++		USB_TYPE_VENDOR | USB_DIR_IN,
++		0xFE, 0, isLock, 1, 500);
+ 
+ 	pr_debug("%s: isLock: %02X\n", __func__, *isLock);
+ 
+@@ -197,16 +213,25 @@ static int hd2312_read_status(struct dvb_frontend *fe, enum fe_status *status)
+ 	}
+ 
+ 	/* get signal strength */
+-	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0), 0xEB, 0xC0, 0xFE, 0, buf, 4, 500);
++	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
++		CYUSB_HD2312_GET_STRENGTH,
++		USB_TYPE_VENDOR | USB_DIR_IN,
++		0xFE, 0, buf, 4, 500);
++
+ 	if (ret == 4) {
+ 		pr_debug("%s: strength: %02X, %02X, %02X, %02X\n", __func__, buf[0], buf[1], buf[2], buf[3]);
+ 
+ 		c->strength.stat[0].scale = FE_SCALE_RELATIVE;
+-		c->strength.stat[0].uvalue = buf[3] * 0xffff / 0x64;
++		/* scale to 0xffff */
++		c->strength.stat[0].uvalue = buf[3] * 0xffff / 100;
+ 	}
+ 
+ 	/* get snr */
+-	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0), 0xE8, 0xC0, 0xFE, 0, buf, 2, 500);
++	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
++		CYUSB_HD2312_GET_SNR,
++		USB_TYPE_VENDOR | USB_DIR_IN,
++		0xFE, 0, buf, 2, 500);
++
+ 	if (ret == 2) {
+ 		pr_debug("%s: snr: %02X, %02X\n", __func__, buf[0], buf[1]);
+ 
+diff --git a/hd2312.h b/hd2312.h
+index e08c214..f992e8e 100644
+--- a/hd2312.h
++++ b/hd2312.h
+@@ -11,4 +11,12 @@ struct hd2312_state {
+ 	u8 statistics[4];
+ };
+ 
++#define CYUSB_HD2312_SET_FREQ		0xFC
++#define CYUSB_HD2312_GET_FRONTEND	0xE7
++#define CYUSB_HD2312_GET_SNR		0xE8
++#define CYUSB_HD2312_GET_QUALITY	0xE9
++#define CYUSB_HD2312_GET_LOCK		0xEA
++#define CYUSB_HD2312_GET_STRENGTH	0xEB
++#define CYUSB_HD2312_GET_VERSION	0xED
++
+ #endif
+diff --git a/hdic_hd2312.c b/hdic_hd2312.c
+index fabfc82..aae188f 100644
+--- a/hdic_hd2312.c
++++ b/hdic_hd2312.c
+@@ -37,11 +37,9 @@ static int hd2312_probe(struct usb_interface *intf,
+ 		return -ENOMEM;
+ 
+ 	ret = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
+-					0xED,
+-					0xC0,
+-					0xFE,
+-					0, buf, 4,
+-					500);
++					CYUSB_HD2312_GET_VERSION,
++					USB_TYPE_VENDOR | USB_DIR_IN,
++					0xFE, 0, buf, 4, 500);
+ 
+ 	if (ret != 4)
+ 		goto err;
+@@ -62,7 +60,7 @@ static int hd2312_streaming_ctrl(struct dvb_usb_adapter *adpt, int onoff)
+ 
+ 	pr_debug("%s: onoff=%d\n", __func__, onoff);
+ 
+-	ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0), (onoff ? 0xab : 0xac), 0x40, 0xFE, 0, NULL, 0, 0);
++	ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0), (onoff ? 0xab : 0xac), USB_TYPE_VENDOR, 0xFE, 0, NULL, 0, 0);
+ 
+ 	return ret;
+ }
+@@ -74,7 +72,7 @@ static int hd2312_power_ctrl(struct dvb_usb_device *d, int onoff)
+ 
+ 	pr_debug("%s: onoff=%d\n", __func__, onoff);
+ 
+-	ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0), (onoff ? 0xad : 0xae), 0x40, 0xFE, 0, NULL, 0, 0);
++	ret = usb_control_msg(dev, usb_sndctrlpipe(dev, 0), (onoff ? 0xad : 0xae), USB_TYPE_VENDOR, 0xFE, 0, NULL, 0, 0);
+ 
+ 	return ret;
+ }
